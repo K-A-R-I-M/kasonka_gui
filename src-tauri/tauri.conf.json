@@ -6,8 +6,8 @@
     "distDir": "../build"
   },
   "package": {
-    "productName": "kasonka",
-    "version": "0.5.0"
+    "productName": "kasonka-gui",
+    "version": "0.1.0"
   },
   "tauri": {
     "allowlist": {
@@ -52,7 +52,7 @@
         "icons/icon.icns",
         "icons/icon.ico"
       ],
-      "identifier": "ml.kasonka.dev",
+      "identifier": "ml.kasonka-gui.dev",
       "longDescription": "",
       "macOS": {
         "entitlements": null,

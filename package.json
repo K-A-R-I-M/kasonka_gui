@@ -1,6 +1,6 @@
 {
-  "name": "kasonka",
-  "version": "0.5.0",
+  "name": "kasonka-gui",
+  "version": "0.1.0",
   "private": true,
   "scripts": {
     "dev": "vite dev",

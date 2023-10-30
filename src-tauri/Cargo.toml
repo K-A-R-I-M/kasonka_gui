@@ -1,11 +1,11 @@
 [package]
-name = "kasonka"
+name = "kasonka-gui"
 version = "0.1.0"
-description = "Kasonka App"
+description = "Kasonka GUI App"
 authors = ["K-A-R-I-M"]
 license = ""
 repository = ""
-default-run = "kasonka"
+default-run = "kasonka-gui"
 edition = "2021"
 rust-version = "1.60"
 
