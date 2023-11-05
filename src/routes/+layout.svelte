@@ -5,7 +5,7 @@
   import { invoke } from "@tauri-apps/api/tauri";
   import { setContext, onDestroy, onMount } from "svelte";
   import Notification from "$lib/Notification.svelte";
-  import type { Notif, Payload } from "$lib/types";
+  import type { Notif } from "$lib/types";
 
   import { fade, fly } from "svelte/transition";
   import { flip } from "svelte/animate";
@@ -14,18 +14,22 @@
   let play = false;
   let notifications: Array<Notif> = [];
 
-  setContext("cta", { update_cta, update_play, notify });
+  setContext("cta", { update_cta, update_play, notify, get_cta });
 
   function update_cta(newCta: string) {
     current_title_audio = newCta;
   }
+  function get_cta(newCta: string) {
+    return current_title_audio;
+  }
   function update_play(new_play: boolean) {
     play = new_play;
   }
-  function notify(audio_title: string) {
+  function notify(title: string, text: string) {
     const newNotif: Notif = {
       id: notifications.length + 1 + Date.now(),
-      audio_title: audio_title,
+      title: title,
+      text: text,
     };
     notifications = [...notifications, newNotif];
 
@@ -61,18 +65,18 @@
 
 <div class="flex flex-col bg-black text-white min-h-screen">
   <div
-    class="fixed top-0 p-4 w-52 h-72 mt-8 overflow-y-hidden overflow-x-hidden"
+    class="fixed top-0 p-4 w-52 h-72 mt-16 overflow-y-hidden overflow-x-hidden"
   >
     <div class="flex flex-col-reverse justify-center items-center">
       {#each notifications as notification (notification.id)}
         <div in:fly={{ y: -288 }} out:fade animate:flip={{ duration: 200 }}>
-          <Notification audio_title={notification.audio_title} />
+          <Notification title={notification.title} text={notification.text} />
         </div>
       {/each}
     </div>
   </div>
   <Header />
-  <div class="flex-grow mb-28 mt-12">
+  <div class="flex-grow mb-28 mt-20">
     <slot />
   </div>
   <Footer {current_title_audio} {play} />

@@ -1,5 +1,7 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/tauri";
+  import { getContext } from "svelte";
+  const { notify }: any = getContext("cta");
 
   export let play: boolean;
   export let current_title_audio: string;
@@ -21,7 +23,11 @@
   }
 
   async function get_cta() {
+    let old_cta = current_title_audio;
     current_title_audio = await invoke("get_cta");
+    if (current_title_audio != old_cta) {
+      notify("Now playing", 'Start to play: "' + current_title_audio + '"');
+    }
   }
 
   if (typeof window !== "undefined") {
@@ -66,7 +72,7 @@
       <li><a href="/" class="hover:text-gray-400">Home</a></li>
       <li><a href="/playlist" class="hover:text-gray-400">Playlist</a></li>
       <li><a href="/credits" class="hover:text-gray-400">Credits</a></li>
-      <li><a href="/parametre" class="hover:text-gray-400">Parametre</a></li>
+      <li><a href="/settings" class="hover:text-gray-400">Settings</a></li>
     </ul>
   </nav>
 </div>

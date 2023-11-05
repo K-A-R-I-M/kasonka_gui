@@ -7,28 +7,24 @@ use crate::lib::central_lib::dependencies_check;
 use crate::lib::model_lib::{
     AudioPlayer, GeneralSignal, GeneralVars, MediaControlsInternal, PlaylistKa,
 };
+use cpal::traits::HostTrait;
+use cpal::{default_host, StreamError};
 use lib::model_lib::AudioPlayerStatus;
-use rodio::Sink;
-use souvlaki::{MediaControlEvent, MediaControls, MediaMetadata, MediaPlayback, PlatformConfig};
+use rodio::Source;
+use rodio::{Device, DeviceTrait, Devices, OutputStream, Sink};
+use souvlaki::{MediaControls, PlatformConfig};
 use std::ffi::c_void;
-use std::ops::Deref;
-use std::process::exit;
+use std::fs::File;
+use std::io::BufReader;
 use std::sync::{Arc, Mutex};
-use std::thread::sleep;
-use std::time::Duration;
 use std::{env, fs, io, thread};
 use tauri::State;
 
 #[cfg(target_os = "windows")]
-use windows::Win32::Foundation::HWND;
-#[cfg(target_os = "windows")]
 use windows::Win32::System::Console::GetConsoleWindow;
 
 #[tauri::command]
-fn add_audio(
-    state: tauri::State<Arc<Mutex<Option<AudioPlayer>>>>,
-    title_audio: &str,
-) -> (String, bool) {
+fn add_audio(state: State<Arc<Mutex<Option<AudioPlayer>>>>, title_audio: &str) -> (String, bool) {
     let mut return_value = (String::from(""), false);
     let title_audio_clone = title_audio.clone();
 
@@ -52,7 +48,7 @@ fn add_audio(
 }
 
 #[tauri::command]
-fn resume_pause(state: tauri::State<Arc<Mutex<Option<AudioPlayer>>>>) -> bool {
+fn resume_pause(state: State<Arc<Mutex<Option<AudioPlayer>>>>) -> bool {
     let ap_local_clone = state.inner().clone();
     let mut binding_ap = ap_local_clone.lock().unwrap();
     let mut binding_ap_none = AudioPlayer::new_none();
@@ -69,7 +65,7 @@ fn resume_pause(state: tauri::State<Arc<Mutex<Option<AudioPlayer>>>>) -> bool {
 }
 
 #[tauri::command]
-fn get_cta(state: tauri::State<Arc<Mutex<Option<AudioPlayer>>>>) -> String {
+fn get_cta(state: State<Arc<Mutex<Option<AudioPlayer>>>>) -> String {
     let ap_local_clone = state.inner().clone();
     let mut binding_ap = ap_local_clone.lock().unwrap();
     let mut binding_ap_none = AudioPlayer::new_none();
@@ -96,7 +92,7 @@ fn get_cta(state: tauri::State<Arc<Mutex<Option<AudioPlayer>>>>) -> String {
 }
 
 #[tauri::command]
-fn next(state: tauri::State<Arc<Mutex<Option<AudioPlayer>>>>) {
+fn next(state: State<Arc<Mutex<Option<AudioPlayer>>>>) {
     let ap_local_clone = state.inner().clone();
     let mut binding_ap = ap_local_clone.lock().unwrap();
     let mut binding_ap_none = AudioPlayer::new_none();
@@ -106,7 +102,7 @@ fn next(state: tauri::State<Arc<Mutex<Option<AudioPlayer>>>>) {
 }
 
 #[tauri::command]
-fn previous(state: tauri::State<Arc<Mutex<Option<AudioPlayer>>>>) {
+fn previous(state: State<Arc<Mutex<Option<AudioPlayer>>>>) {
     let ap_local_clone = state.inner().clone();
     let mut binding_ap = ap_local_clone.lock().unwrap();
     let mut binding_ap_none = AudioPlayer::new_none();
@@ -116,7 +112,7 @@ fn previous(state: tauri::State<Arc<Mutex<Option<AudioPlayer>>>>) {
 }
 
 #[tauri::command]
-fn get_list_audio(state: tauri::State<Arc<Mutex<Option<AudioPlayer>>>>) -> Vec<String> {
+fn get_list_audio(state: State<Arc<Mutex<Option<AudioPlayer>>>>) -> Vec<String> {
     let ap_local_clone = state.inner().clone();
     let mut binding_ap = ap_local_clone.lock().unwrap();
     let mut binding_ap_none = AudioPlayer::new_none();
@@ -130,7 +126,7 @@ fn get_list_audio(state: tauri::State<Arc<Mutex<Option<AudioPlayer>>>>) -> Vec<S
 }
 
 #[tauri::command]
-fn get_volume(state: tauri::State<Arc<Mutex<Option<AudioPlayer>>>>) -> i32 {
+fn get_volume(state: State<Arc<Mutex<Option<AudioPlayer>>>>) -> u32 {
     let ap_local_clone = state.inner().clone();
     let mut binding_ap = ap_local_clone.lock().unwrap();
     let mut binding_ap_none = AudioPlayer::new_none();
@@ -140,13 +136,117 @@ fn get_volume(state: tauri::State<Arc<Mutex<Option<AudioPlayer>>>>) -> i32 {
 }
 
 #[tauri::command]
-fn set_volume(state: tauri::State<Arc<Mutex<Option<AudioPlayer>>>>, volume_value: i32) {
+fn set_volume(state: State<Arc<Mutex<Option<AudioPlayer>>>>, volume_value: u32) {
     let ap_local_clone = state.inner().clone();
     let mut binding_ap = ap_local_clone.lock().unwrap();
     let mut binding_ap_none = AudioPlayer::new_none();
     let ap = binding_ap.as_mut().unwrap_or(&mut binding_ap_none);
     *ap.volume.lock().unwrap() = volume_value;
     ap.update_volume();
+}
+
+#[tauri::command]
+fn get_audio_devices() -> Vec<String> {
+    let mut devices_string: Vec<String> = Vec::new();
+    let devices_raw = default_host().output_devices();
+    match devices_raw {
+        Ok(devices_raw_success) => {
+            for device in devices_raw_success {
+                match device.name() {
+                    Ok(device_name) => {
+                        devices_string.push(device_name);
+                    }
+                    Err(_) => {}
+                }
+            }
+        }
+
+        Err(_) => {}
+    }
+
+    devices_string
+}
+
+#[tauri::command]
+fn set_audio_device(
+    state: State<Arc<Mutex<Option<AudioPlayer>>>>,
+    devnameselected: String,
+) -> String {
+    let ap_local_clone = state.inner().clone();
+    let mut binding_ap = ap_local_clone.lock().unwrap();
+    let mut binding_ap_none = AudioPlayer::new_none();
+    let ap = binding_ap.as_mut().unwrap_or(&mut binding_ap_none);
+
+    let mut device_selected_confirmed: String = String::from("");
+
+    let devices_raw = default_host().output_devices();
+    match devices_raw {
+        Ok(devices_raw_success) => {
+            for device in devices_raw_success {
+                match device.name() {
+                    Ok(device_name) => {
+                        if devnameselected.clone() == device_name {
+                            match rodio::OutputStream::try_from_device(&device) {
+                                Ok((_stream, stream_handle)) => {
+                                    let sink_raw = Sink::try_new(&stream_handle);
+                                    match sink_raw {
+                                        Ok(_) => {
+                                            *ap.current_output_device.lock().unwrap() =
+                                                Some(device_name.clone());
+
+                                            device_selected_confirmed = device_name;
+                                        }
+                                        Err(error) => {
+                                            panic!("ERROR : audio unavailable !!! : {}", error)
+                                        }
+                                    }
+                                }
+                                Err(_) => {
+                                    device_selected_confirmed = String::from("");
+                                }
+                            };
+                        }
+                    }
+                    Err(_) => {
+                        device_selected_confirmed = String::from("");
+                    }
+                }
+            }
+        }
+
+        Err(_) => {
+            device_selected_confirmed = String::from("");
+        }
+    }
+
+    device_selected_confirmed
+}
+
+#[tauri::command]
+fn get_default_audio_device(state: State<Arc<Mutex<Option<AudioPlayer>>>>) -> String {
+    let mut default_device_name = String::from("");
+
+    let ap_local_clone = state.inner().clone();
+    let mut binding_ap = ap_local_clone.lock().unwrap();
+    let mut binding_ap_none = AudioPlayer::new_none();
+    let ap = binding_ap.as_mut().unwrap_or(&mut binding_ap_none);
+    let device_name_clone = ap.current_output_device.lock().unwrap().clone();
+
+    match device_name_clone {
+        Some(device_name) => {
+            default_device_name = device_name;
+        }
+        None => match default_host().default_output_device() {
+            Some(default_device) => {
+                match default_device.name() {
+                    Ok(name) => default_device_name = name,
+                    Err(_) => default_device_name = String::from("None"),
+                };
+            }
+            None => {}
+        },
+    }
+    default_device_name
 }
 
 fn init() -> io::Result<()> {
@@ -184,18 +284,8 @@ fn main() {
 
         let mut controls = Arc::new(Mutex::new(None));
 
-        //--------------------------------- AUDIO INIT ---------------------------------
-        let (_stream, stream_handle) = rodio::OutputStream::try_default().unwrap();
-        let sink_raw = Sink::try_new(&stream_handle);
-
-        let sink = match sink_raw {
-            Ok(sink_result) => sink_result,
-            Err(error) => panic!("ERROR : audio unavailable !!! : {}", error),
-        };
-
-        let audio_player = Arc::new(Mutex::new(sink));
         //--------------------------------- AUDIO PLAYER INIT ---------------------------------
-        let ap = Arc::new(Mutex::new(Some(AudioPlayer::new(audio_player))));
+        let ap = Arc::new(Mutex::new(Some(AudioPlayer::new())));
 
         //--------------------------------- CONT PlaylistKa INIT ---------------------------------
         let cont_pk: Arc<Mutex<Vec<PlaylistKa>>> = Arc::new(Mutex::new(Vec::new()));
@@ -277,7 +367,10 @@ fn main() {
                 get_cta,
                 get_list_audio,
                 get_volume,
-                set_volume
+                set_volume,
+                get_audio_devices,
+                set_audio_device,
+                get_default_audio_device
             ])
             .run(tauri::generate_context!())
             .expect("error while running tauri application");

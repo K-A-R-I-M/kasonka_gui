@@ -1,5 +1,6 @@
 <script lang="ts">
-  export let audio_title: string;
+  export let title: string;
+  export let text: string;
 </script>
 
 <div
@@ -7,7 +8,7 @@
   role="alert"
 >
   <div class="flex flex-col">
-    <p class="font-bold">Start downloading</p>
-    <p class="text-sm">"{audio_title}" will be downloaded</p>
+    <p class="font-bold">{title}</p>
+    <p class="text-sm">{text}</p>
   </div>
 </div>

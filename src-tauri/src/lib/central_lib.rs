@@ -52,11 +52,16 @@ pub fn research_on_yt(research_txt: &str) -> (Vec<String>, String) {
 }
 
 pub fn exec_command_yt_dl_tauri(url: &str, file_name: &str) {
-    #[cfg(not(target_os = "windows"))]
-    let command = "utils/yt-dlp";
-    #[cfg(target_os = "windows")]
-    let command = "utils\\yt-dlp-x86_64-pc-windows-msvc";
+    // Linux
+    let mut command = "utils/yt-dlp";
+    let mut ffmpeg = "ffmpeg";
+    // Windows
+    if cfg!(target_os = "windows") {
+        command = "utils\\yt-dlp-x86_64-pc-windows-msvc";
+        ffmpeg = "ffmpeg-x86_64-pc-windows-msvc.exe";
+    }
 
+    #[cfg(target_os = "windows")]
     let mut data_path = env::current_exe().expect("Failed to get executable path");
     data_path.pop(); // Remove the executable name from the path
     data_path.push("data");
@@ -65,7 +70,7 @@ pub fn exec_command_yt_dl_tauri(url: &str, file_name: &str) {
     let mut path_dir_bin = env::current_exe().expect("Failed to get executable path");
     path_dir_bin.pop();
     path_dir_bin.push("utils");
-    path_dir_bin.push("ffmpeg-x86_64-pc-windows-msvc.exe");
+    path_dir_bin.push(ffmpeg);
 
     // `new_sidecar()` attend juste le nom du fichier, PAS le chemin complet comme en JavaScript
     let (mut rx, mut child) = Com::new_sidecar(command)
@@ -92,7 +97,7 @@ pub fn dependencies_check() -> bool {
     let mut file_names = vec!["data"];
 
     #[cfg(not(target_os = "windows"))]
-    let file_names_os = vec!["yt-dlp.exe", "ffmpeg"];
+    let file_names_os = vec!["utils/yt-dlp", "utils/ffmpeg"];
     #[cfg(target_os = "windows")]
     let mut file_names_os = vec![
         "utils/yt-dlp-x86_64-pc-windows-msvc.exe",

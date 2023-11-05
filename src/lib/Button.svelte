@@ -2,6 +2,6 @@
   export let value;
 </script>
 
-<button type="submit" class="bg-red-500 p-2 text-white text-lg">
+<button type="submit" class="bg-green-500 p-1 text-white text-lg">
   {value}
 </button>

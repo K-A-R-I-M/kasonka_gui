@@ -1,13 +1,19 @@
+use crate::get_audio_devices;
+
 use super::central_lib::{exec_command_yt_dl_tauri, research_on_yt};
-use rodio::{Sink, Source};
+use cpal::traits::HostTrait;
+use cpal::{default_host, StreamError};
+use rodio::{Decoder, Device, DeviceTrait, Sink, Source};
 use souvlaki::{MediaControlEvent, MediaControls, MediaMetadata, MediaPlayback, MediaPosition};
 use std::fmt::{Display, Formatter};
 use std::fs::File;
 use std::io::BufReader;
+use std::rc::Rc;
+use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::sleep;
 use std::time::Duration;
-use std::{env, thread};
+use std::{env, thread, u32};
 
 #[repr(u32)]
 pub enum GeneralSignal {
@@ -35,43 +41,6 @@ impl GeneralVars {
     }
 }
 
-pub struct Menu {
-    pub menu_choice: Vec<String>,
-    pub menu_choice_quit: Vec<String>,
-}
-
-impl Menu {
-    pub fn main_menu() -> Self {
-        Self {
-            menu_choice: vec![
-                String::from("jouer un audio"),
-                String::from("pause/reprendre l'audio"),
-                String::from("next audio"),
-                String::from("afficher le file de lecture"),
-                String::from("menu playlist"),
-                String::from("arreter/redemarrer le systeme de lecture audio"),
-                String::from("credits"),
-                String::from("parametre"),
-            ],
-            menu_choice_quit: vec![String::from("sortir")],
-        }
-    }
-    pub fn playlist_menu() -> Self {
-        Self {
-            menu_choice: vec![
-                String::from("crée une playlist"),
-                String::from("afficher tout les playlists existantes"),
-                String::from("afficher une playlist"),
-                String::from("gerer une playlist"),
-                String::from("jouer une playlist"),
-                String::from("importer une playliste youtube"),
-                String::from("skip la playlist courante"),
-            ],
-            menu_choice_quit: vec![String::from("retour")],
-        }
-    }
-}
-
 #[derive(Clone)]
 pub enum AudioPlayerStatus {
     Pause,
@@ -85,26 +54,28 @@ pub struct AudioPlayer {
     pub status: Arc<Mutex<AudioPlayerStatus>>,
     pub current_nb_audios: Arc<Mutex<u32>>,
     pub nb_audios: Arc<Mutex<u32>>,
-    pub play_obj: Arc<Mutex<Sink>>,
+    pub current_output_device: Arc<Mutex<Option<String>>>,
     pub list_audio: Vec<PlaylistKa>,
     pub queue_audio: Vec<PlaylistKa>,
     pub thread_status: Arc<Mutex<bool>>,
     pub current_audio_time: Arc<Mutex<Duration>>,
-    pub volume: Arc<Mutex<i32>>,
+    pub volume: Arc<Mutex<u32>>,
+    pub current_audio_sink_sender: Arc<Mutex<Option<Sender<String>>>>,
 }
 
 impl AudioPlayer {
-    pub fn new(audio_player: Arc<Mutex<Sink>>) -> Self {
+    pub fn new() -> Self {
         Self {
             status: Arc::new(Mutex::new(AudioPlayerStatus::Empty)),
             current_nb_audios: Arc::new(Mutex::new(0)),
             nb_audios: Arc::new(Mutex::new(0)),
-            play_obj: audio_player,
+            current_output_device: Arc::new(Mutex::new(None)),
             list_audio: Vec::new(),
             queue_audio: Vec::new(),
             thread_status: Arc::new(Mutex::new(true)),
             current_audio_time: Arc::new(Mutex::new(Duration::new(0, 0))),
-            volume: Arc::new(Mutex::new(50)),
+            volume: Arc::new(Mutex::new(100)),
+            current_audio_sink_sender: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -113,12 +84,13 @@ impl AudioPlayer {
             status: Arc::new(Mutex::new(AudioPlayerStatus::Disabled)),
             current_nb_audios: Arc::new(Mutex::new(0)),
             nb_audios: Arc::new(Mutex::new(0)),
-            play_obj: Arc::new(Mutex::new(Sink::new_idle().0)),
+            current_output_device: Arc::new(Mutex::new(None)),
             list_audio: Vec::new(),
             queue_audio: Vec::new(),
             thread_status: Arc::new(Mutex::new(true)),
             current_audio_time: Arc::new(Mutex::new(Duration::new(0, 0))),
-            volume: Arc::new(Mutex::new(50)),
+            volume: Arc::new(Mutex::new(100)),
+            current_audio_sink_sender: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -146,7 +118,8 @@ impl AudioPlayer {
                 loop {
                     if *ap.thread_status.lock().unwrap() {
                         if ap.is_nextable() {
-                            while !(ap.play_obj.lock().unwrap().empty()) {
+                            while !(matches!(*ap.status.lock().unwrap(), AudioPlayerStatus::Empty))
+                            {
                                 sleep(Duration::new(1, 0));
                             }
                             // println!("neeeeeeeeeext");
@@ -226,14 +199,28 @@ impl AudioPlayer {
 
     pub fn pause(&mut self) {
         if matches!(*self.status.lock().unwrap(), AudioPlayerStatus::Play) {
-            self.play_obj.lock().unwrap().pause();
+            let current_sender_option_clone = self.current_audio_sink_sender.clone();
+            let current_sender_option = current_sender_option_clone.lock().unwrap().clone();
+            match current_sender_option {
+                Some(tx) => {
+                    tx.send("pause".to_string()).unwrap();
+                }
+                None => {}
+            }
             *self.status.lock().unwrap() = AudioPlayerStatus::Pause;
         }
     }
 
     pub fn resume(&mut self) {
         if matches!(*self.status.lock().unwrap(), AudioPlayerStatus::Pause) {
-            self.play_obj.lock().unwrap().play();
+            let current_sender_option_clone = self.current_audio_sink_sender.clone();
+            let current_sender_option = current_sender_option_clone.lock().unwrap().clone();
+            match current_sender_option {
+                Some(tx) => {
+                    tx.send("play".to_string()).unwrap();
+                }
+                None => {}
+            }
             *self.status.lock().unwrap() = AudioPlayerStatus::Play;
         }
     }
@@ -248,12 +235,6 @@ impl AudioPlayer {
         let nb_audio_clone_u32 = *nb_audio_clone.lock().unwrap();
         let current_nb_audios_clone_u32 = *current_nb_audios_clone.lock().unwrap();
 
-        // println!(
-        //     "{} / {} : {}",
-        //     current_nb_audios_clone_u32,
-        //     nb_audio_clone_u32,
-        //     current_nb_audios_clone_u32 < nb_audio_clone_u32
-        // );
         return current_nb_audios_clone_u32 < nb_audio_clone_u32 && nb_audio_clone_u32 > 1;
     }
 
@@ -280,7 +261,7 @@ impl AudioPlayer {
     pub fn next_audio(&mut self) {
         if !(matches!(*self.status.lock().unwrap(), AudioPlayerStatus::Empty)) {
             if self.is_nextable() {
-                self.play_obj.lock().unwrap().stop();
+                self.destroy_old_audio();
 
                 let current_nb_audios_clone = self.current_nb_audios.clone();
 
@@ -297,7 +278,7 @@ impl AudioPlayer {
     pub fn prev_audio(&mut self) {
         if !(matches!(*self.status.lock().unwrap(), AudioPlayerStatus::Empty)) {
             if self.is_previousable() {
-                self.play_obj.lock().unwrap().stop();
+                self.destroy_old_audio();
 
                 let current_nb_audios_clone = self.current_nb_audios.clone();
 
@@ -325,78 +306,218 @@ impl AudioPlayer {
         return (file_name, title);
     }
 
-    pub fn play_audio(&mut self) {
-        // VAR
+    fn destroy_old_audio(&mut self) {
+        let current_sender_option_clone = self.current_audio_sink_sender.clone();
+        let current_sender_option = current_sender_option_clone.lock().unwrap().clone();
+        //destoy old one if existing
+        match current_sender_option {
+            Some(tx) => {
+                tx.send("destroy".to_string()).unwrap();
+            }
+            None => {}
+        }
+    }
 
-        let audio_player_clone = self.play_obj.clone();
+    pub fn play_audio(&mut self) {
         let current_audio_time_clone = self.current_audio_time.clone();
-        // let _list_audio_clone = self.list_audio.clone();
-        // let _current_nb_audios_clone_u32 = *self.current_nb_audios.clone().lock().unwrap();
+        let volume = self.volume.clone();
+        let device_name_option_raw = self.current_output_device.clone();
+        let device_name_option = device_name_option_raw.lock().unwrap().clone();
+
         let file_name = format!("audio{}.wav", *self.current_nb_audios.lock().unwrap());
 
-        // Get audio file path  which is clean
         let mut path = env::current_exe().expect("Failed to get executable path");
         path.pop();
         path.push("data");
         path.push(file_name);
 
-        /*let current_audio_title= list_audio_clone.get((current_nb_audios_clone_u32 - 1) as usize).map_or_else(|| String::from("None"), |inner_value| {
-            inner_value.audios.get(inner_value.current_audio_index as usize).unwrap().title.to_string()
-        });*/
-        //// tui_print(format!("Start playing : {}", current_audio_title).as_str());
+        let (tx, rx) = mpsc::channel();
 
-        // Spawn a thread to play the audio
+        *self.current_audio_sink_sender.lock().unwrap() = Some(tx);
+
         thread::spawn(move || {
-            let mut audio_player = audio_player_clone.lock().unwrap();
             let mut current_audio_time = current_audio_time_clone.lock().unwrap();
-            Self::exec_play_audio(
-                &path.to_string_lossy().to_string(),
-                &mut audio_player,
+
+            AudioPlayer::audio_thread(
+                rx,
+                device_name_option,
+                path.to_string_lossy().to_string().clone(),
+                volume,
                 &mut current_audio_time,
             );
         });
     }
 
-    fn exec_play_audio(path: &str, audio_player: &Sink, current_audio_time: &mut Duration) {
-        //println!("{:?}", format!("{}\\{}.mp3", dir_path, file_name));
-        // try to open the audio file
+    // fn exec_play_audio(path: &str, audio_player: &Sink, current_audio_time: &mut Duration) {
+    //     //println!("{:?}", format!("{}\\{}.mp3", dir_path, file_name));
+    //     // try to open the audio file
 
-        let mut iter = 0;
+    //     let mut iter = 0;
 
-        while (iter <= 10) {
-            let file_raw = File::open(path);
-            match file_raw {
-                Ok(file) => {
-                    // fix unwrap taht fails some times
-                    let audio_source = rodio::Decoder::new(BufReader::new(file)).unwrap();
+    //     while (iter <= 10) {
+    //         let file_raw = File::open(path);
+    //         match file_raw {
+    //             Ok(file) => {
+    //                 // fix unwrap taht fails some times
+    //                 match rodio::Decoder::new(BufReader::new(file)) {
+    //                     Ok(audio_source) => {
+    //                         *current_audio_time =
+    //                             audio_source.total_duration().unwrap_or(Duration::new(0, 0));
+    //                         println!("around {:?} seconds", current_audio_time);
+    //                         println!("---------------------------------------");
 
-                    *current_audio_time =
-                        audio_source.total_duration().unwrap_or(Duration::new(0, 0));
-                    println!("around {:?} seconds", current_audio_time);
-                    println!("---------------------------------------");
+    //                         // Play the audio file
+    //                         audio_player.append(audio_source);
+    //                         audio_player.play();
+    //                         break;
+    //                     }
+    //                     Err(_) => {}
+    //                 }
+    //             }
+    //             Err(error) => {
+    //                 iter = iter + 1;
 
-                    // Play the audio file
-                    audio_player.append(audio_source);
-                    audio_player.play();
-                    break;
+    //                 println!("Error: audio file problem : {}", error);
+    //                 println!("{:?}", path.clone());
+    //                 sleep(Duration::new(2, 0))
+    //             }
+    //         }
+    //     }
+    // }
+
+    pub fn update_volume(&mut self) {
+        if !(matches!(*self.status.lock().unwrap(), AudioPlayerStatus::Disabled)) {
+            let current_sender_option_clone = self.current_audio_sink_sender.clone();
+            let current_sender_option = current_sender_option_clone.lock().unwrap().clone();
+            match current_sender_option {
+                Some(tx) => {
+                    tx.send("volume".to_string()).unwrap();
                 }
-                Err(error) => {
-                    iter = iter + 1;
-
-                    println!("Error: audio file problem : {}", error);
-                    println!("{:?}", path.clone());
-                    sleep(Duration::new(2, 0))
-                }
+                None => {}
             }
         }
     }
 
-    pub fn update_volume(&mut self) {
-        if !(matches!(*self.status.lock().unwrap(), AudioPlayerStatus::Disabled)) {
-            self.play_obj
-                .lock()
-                .unwrap()
-                .set_volume(((*self.volume.lock().unwrap()) as f32) / 100.0);
+    fn get_output_device(device_name_option: Option<String>) -> Option<Device> {
+        let mut option_device = None;
+        match device_name_option {
+            Some(dev_name) => {
+                let devices_raw = default_host().output_devices();
+                match devices_raw {
+                    Ok(devices_raw_success) => {
+                        for device in devices_raw_success {
+                            match device.name() {
+                                Ok(device_name) => {
+                                    if dev_name.clone() == device_name {
+                                        option_device = Some(device);
+                                    }
+                                }
+                                Err(_) => {}
+                            }
+                        }
+                    }
+                    Err(_) => {}
+                }
+            }
+            None => match default_host().default_output_device() {
+                Some(device) => {
+                    option_device = Some(device);
+                }
+                None => {}
+            },
+        }
+        option_device
+    }
+    fn audio_thread(
+        rx: mpsc::Receiver<String>,
+        device_name_option: Option<String>,
+        path: String,
+        volume: Arc<Mutex<u32>>,
+        current_audio_time: &mut Duration,
+    ) {
+        match Self::get_output_device(device_name_option) {
+            Some(device) => match rodio::OutputStream::try_from_device(&device) {
+                Ok((_stream, stream_handle)) => {
+                    let mut iter = 0;
+
+                    while (iter <= 10) {
+                        let file_raw = File::open(&path);
+                        match file_raw {
+                            Ok(file) => {
+                                match rodio::Decoder::new(BufReader::new(file)) {
+                                    Ok(audio_source) => {
+                                        let mut sink_n = Sink::try_new(&stream_handle);
+
+                                        match sink_n {
+                                            Ok(sink) => {
+                                                *current_audio_time = audio_source
+                                                    .total_duration()
+                                                    .unwrap_or(Duration::new(0, 0));
+                                                println!("around {:?} seconds", current_audio_time);
+                                                println!("---------------------------------------");
+
+                                                sink.append(audio_source);
+                                                sink.play();
+                                                let mut destroy = false;
+                                                while !(destroy) {
+                                                    match rx.recv() {
+                                                        Ok(command) => {
+                                                            match command.as_str() {
+                                                                "play" => {
+                                                                    // Play audio
+                                                                    sink.play();
+                                                                }
+                                                                "pause" => {
+                                                                    // Pause audio
+                                                                    sink.pause();
+                                                                }
+                                                                "volume" => {
+                                                                    // drop audio
+                                                                    sink.set_volume(
+                                                                        volume
+                                                                            .lock()
+                                                                            .unwrap()
+                                                                            .clone()
+                                                                            as f32
+                                                                            / 100.0,
+                                                                    );
+                                                                }
+                                                                "stop" => {
+                                                                    // Stop audio
+                                                                    sink.stop();
+                                                                }
+                                                                "destroy" => {
+                                                                    // drop audio
+                                                                    destroy = true;
+                                                                }
+                                                                _ => {}
+                                                            }
+                                                        }
+                                                        Err(_) => {} // Exit the thread on channel disconnect
+                                                    }
+                                                }
+                                                println!("out");
+                                                break;
+                                            }
+                                            Err(_) => {}
+                                        }
+                                    }
+                                    Err(_) => {}
+                                }
+                            }
+                            Err(error) => {
+                                iter = iter + 1;
+
+                                println!("Error: audio file problem : {}", error);
+                                println!("{:?}", path.clone());
+                                sleep(Duration::new(2, 0))
+                            }
+                        }
+                    }
+                }
+                Err(_) => {}
+            },
+            None => {}
         }
     }
 }

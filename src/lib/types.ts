@@ -5,9 +5,6 @@ export interface Item {
 
 export interface Notif{
 	id: number,
-	audio_title: string
+	title: string;
+	text: string
 }
-
-export interface Payload = {
-    message: string;
-};
