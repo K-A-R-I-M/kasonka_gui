@@ -87,7 +87,7 @@ fn get_cta(state: State<Arc<Mutex<Option<AudioPlayer>>>>) -> String {
                 },
             )
     } else {
-        "Audio".to_string()
+        String::new()
     }
 }
 

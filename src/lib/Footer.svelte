@@ -4,7 +4,7 @@
   const { notify }: any = getContext("cta");
 
   export let play: boolean;
-  export let current_title_audio: string;
+  export let current_title_audio: string = "";
 
   async function resume() {
     play = await invoke("resume_pause");

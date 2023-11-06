@@ -10,7 +10,7 @@
   import { fade, fly } from "svelte/transition";
   import { flip } from "svelte/animate";
 
-  let current_title_audio = "Audio Title";
+  let current_title_audio: string;
   let play = false;
   let notifications: Array<Notif> = [];
 
@@ -48,7 +48,7 @@
   let intervalId: number;
 
   async function startSerialEventListener() {
-    current_title_audio = current_title_audio = await invoke("get_cta");
+    current_title_audio = await invoke("get_cta");
   }
 
   // Start checking the API when the component is mounted

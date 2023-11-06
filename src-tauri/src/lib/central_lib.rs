@@ -4,6 +4,7 @@ use reqwest::get;
 use scraper::{Html, Selector};
 use std::{env, fs};
 use tauri::api::process::{Command as Com, CommandEvent};
+use std::fs::File;
 
 fn get_yt_page(req: &str) -> Result<String, Box<dyn std::error::Error>> {
     let yt_page_txt = reqwest::blocking::get(
@@ -61,7 +62,6 @@ pub fn exec_command_yt_dl_tauri(url: &str, file_name: &str) {
         ffmpeg = "ffmpeg-x86_64-pc-windows-msvc.exe";
     }
 
-    #[cfg(target_os = "windows")]
     let mut data_path = env::current_exe().expect("Failed to get executable path");
     data_path.pop(); // Remove the executable name from the path
     data_path.push("data");
@@ -97,7 +97,7 @@ pub fn dependencies_check() -> bool {
     let mut file_names = vec!["data"];
 
     #[cfg(not(target_os = "windows"))]
-    let file_names_os = vec!["utils/yt-dlp", "utils/ffmpeg"];
+    let mut file_names_os = vec!["utils/yt-dlp", "utils/ffmpeg"];
     #[cfg(target_os = "windows")]
     let mut file_names_os = vec![
         "utils/yt-dlp-x86_64-pc-windows-msvc.exe",

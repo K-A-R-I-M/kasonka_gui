@@ -6,7 +6,7 @@
 
   const { update_cta, update_play, notify, get_cta }: any = getContext("cta");
 
-  let title = "";
+  let title: string = "";
 
   let btn_text = "+";
 

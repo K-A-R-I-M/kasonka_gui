@@ -121,8 +121,21 @@ impl AudioPlayer {
                             while !(matches!(*ap.status.lock().unwrap(), AudioPlayerStatus::Empty))
                             {
                                 sleep(Duration::new(1, 0));
+                                let current_sender_option_clone = ap.current_audio_sink_sender.clone();
+                                let current_sender_option = current_sender_option_clone.lock().unwrap().clone();
+                                //destoy old one if existing
+                                match current_sender_option {
+                                    Some(tx) => {
+                                        match tx.send("status".to_string()) {
+                                            Ok(_) => {}
+                                            Err(_) => {}
+                                        };
+                                    }
+                                    None => {}
+                                }
                             }
-                            // println!("neeeeeeeeeext");
+                            println!("neeeeeeeeeext");
+                            *ap.status.lock().unwrap() = AudioPlayerStatus::Pause;
                             ap.next_audio();
                         }
                         sleep(Duration::new(1, 0));
@@ -312,7 +325,10 @@ impl AudioPlayer {
         //destoy old one if existing
         match current_sender_option {
             Some(tx) => {
-                tx.send("destroy".to_string()).unwrap();
+                match tx.send("destroy".to_string()){
+                    Ok(_) => {}
+                    Err(_) => {}
+                };
             }
             None => {}
         }
@@ -323,6 +339,7 @@ impl AudioPlayer {
         let volume = self.volume.clone();
         let device_name_option_raw = self.current_output_device.clone();
         let device_name_option = device_name_option_raw.lock().unwrap().clone();
+        let current_audio_statut_clone = self.status.clone();
 
         let file_name = format!("audio{}.wav", *self.current_nb_audios.lock().unwrap());
 
@@ -343,47 +360,11 @@ impl AudioPlayer {
                 device_name_option,
                 path.to_string_lossy().to_string().clone(),
                 volume,
+                current_audio_statut_clone,
                 &mut current_audio_time,
             );
         });
     }
-
-    // fn exec_play_audio(path: &str, audio_player: &Sink, current_audio_time: &mut Duration) {
-    //     //println!("{:?}", format!("{}\\{}.mp3", dir_path, file_name));
-    //     // try to open the audio file
-
-    //     let mut iter = 0;
-
-    //     while (iter <= 10) {
-    //         let file_raw = File::open(path);
-    //         match file_raw {
-    //             Ok(file) => {
-    //                 // fix unwrap taht fails some times
-    //                 match rodio::Decoder::new(BufReader::new(file)) {
-    //                     Ok(audio_source) => {
-    //                         *current_audio_time =
-    //                             audio_source.total_duration().unwrap_or(Duration::new(0, 0));
-    //                         println!("around {:?} seconds", current_audio_time);
-    //                         println!("---------------------------------------");
-
-    //                         // Play the audio file
-    //                         audio_player.append(audio_source);
-    //                         audio_player.play();
-    //                         break;
-    //                     }
-    //                     Err(_) => {}
-    //                 }
-    //             }
-    //             Err(error) => {
-    //                 iter = iter + 1;
-
-    //                 println!("Error: audio file problem : {}", error);
-    //                 println!("{:?}", path.clone());
-    //                 sleep(Duration::new(2, 0))
-    //             }
-    //         }
-    //     }
-    // }
 
     pub fn update_volume(&mut self) {
         if !(matches!(*self.status.lock().unwrap(), AudioPlayerStatus::Disabled)) {
@@ -433,6 +414,7 @@ impl AudioPlayer {
         device_name_option: Option<String>,
         path: String,
         volume: Arc<Mutex<u32>>,
+        current_audio_statut: Arc<Mutex<AudioPlayerStatus>>,
         current_audio_time: &mut Duration,
     ) {
         match Self::get_output_device(device_name_option) {
@@ -489,6 +471,12 @@ impl AudioPlayer {
                                                                 "destroy" => {
                                                                     // drop audio
                                                                     destroy = true;
+                                                                }
+                                                                "status" => {
+                                                                    if sink.empty(){
+                                                                        *current_audio_statut.lock().unwrap() = AudioPlayerStatus::Empty;
+                                                                        destroy = true;
+                                                                    }
                                                                 }
                                                                 _ => {}
                                                             }
@@ -560,6 +548,7 @@ impl Display for PlaylistKa {
 pub struct AudioKa {
     pub title: String,
     pub url: String,
+    // time: f32,
 }
 
 impl AudioKa {
