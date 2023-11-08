@@ -82,10 +82,12 @@
     "windows": [
       {
         "fullscreen": false,
+        "minHeight": 600,
+        "minWidth": 1000,
         "height": 600,
+        "width": 1000,
         "resizable": true,
-        "title": "Kasonka",
-        "width": 1000
+        "title": "Kasonka"        
       }
     ]
   }

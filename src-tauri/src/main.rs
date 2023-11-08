@@ -13,6 +13,7 @@ use lib::model_lib::AudioPlayerStatus;
 use rodio::Source;
 use rodio::{Device, DeviceTrait, Devices, OutputStream, Sink};
 use souvlaki::{MediaControls, PlatformConfig};
+use std::collections::HashMap;
 use std::ffi::c_void;
 use std::fs::File;
 use std::io::BufReader;
@@ -73,7 +74,7 @@ fn get_cta(state: State<Arc<Mutex<Option<AudioPlayer>>>>) -> String {
 
     if (*ap.nb_audios.lock().unwrap()) > 0 {
         let current_nb_audios_clone_u32 = *ap.current_nb_audios.clone().lock().unwrap();
-        ap.list_audio
+        (*ap.list_audio.lock().unwrap())
             .get((current_nb_audios_clone_u32 - 1) as usize)
             .map_or_else(
                 || String::from("None"),
@@ -112,7 +113,7 @@ fn previous(state: State<Arc<Mutex<Option<AudioPlayer>>>>) {
 }
 
 #[tauri::command]
-fn get_list_audio(state: State<Arc<Mutex<Option<AudioPlayer>>>>) -> Vec<String> {
+fn get_list_audio(state: State<Arc<Mutex<Option<AudioPlayer>>>>) -> Vec<HashMap<String, String>> {
     let ap_local_clone = state.inner().clone();
     let mut binding_ap = ap_local_clone.lock().unwrap();
     let mut binding_ap_none = AudioPlayer::new_none();

@@ -5,6 +5,7 @@ use cpal::traits::HostTrait;
 use cpal::{default_host, StreamError};
 use rodio::{Decoder, Device, DeviceTrait, Sink, Source};
 use souvlaki::{MediaControlEvent, MediaControls, MediaMetadata, MediaPlayback, MediaPosition};
+use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::fs::File;
 use std::io::BufReader;
@@ -55,8 +56,8 @@ pub struct AudioPlayer {
     pub current_nb_audios: Arc<Mutex<u32>>,
     pub nb_audios: Arc<Mutex<u32>>,
     pub current_output_device: Arc<Mutex<Option<String>>>,
-    pub list_audio: Vec<PlaylistKa>,
-    pub queue_audio: Vec<PlaylistKa>,
+    pub list_audio: Arc<Mutex<Vec<PlaylistKa>>>,
+    pub queue_audio: Arc<Mutex<Vec<PlaylistKa>>>,
     pub thread_status: Arc<Mutex<bool>>,
     pub current_audio_time: Arc<Mutex<Duration>>,
     pub volume: Arc<Mutex<u32>>,
@@ -70,8 +71,8 @@ impl AudioPlayer {
             current_nb_audios: Arc::new(Mutex::new(0)),
             nb_audios: Arc::new(Mutex::new(0)),
             current_output_device: Arc::new(Mutex::new(None)),
-            list_audio: Vec::new(),
-            queue_audio: Vec::new(),
+            list_audio: Arc::new(Mutex::new(Vec::new())),
+            queue_audio: Arc::new(Mutex::new(Vec::new())),
             thread_status: Arc::new(Mutex::new(true)),
             current_audio_time: Arc::new(Mutex::new(Duration::new(0, 0))),
             volume: Arc::new(Mutex::new(100)),
@@ -85,8 +86,8 @@ impl AudioPlayer {
             current_nb_audios: Arc::new(Mutex::new(0)),
             nb_audios: Arc::new(Mutex::new(0)),
             current_output_device: Arc::new(Mutex::new(None)),
-            list_audio: Vec::new(),
-            queue_audio: Vec::new(),
+            list_audio: Arc::new(Mutex::new(Vec::new())),
+            queue_audio: Arc::new(Mutex::new(Vec::new())),
             thread_status: Arc::new(Mutex::new(true)),
             current_audio_time: Arc::new(Mutex::new(Duration::new(0, 0))),
             volume: Arc::new(Mutex::new(100)),
@@ -121,8 +122,10 @@ impl AudioPlayer {
                             while !(matches!(*ap.status.lock().unwrap(), AudioPlayerStatus::Empty))
                             {
                                 sleep(Duration::new(1, 0));
-                                let current_sender_option_clone = ap.current_audio_sink_sender.clone();
-                                let current_sender_option = current_sender_option_clone.lock().unwrap().clone();
+                                let current_sender_option_clone =
+                                    ap.current_audio_sink_sender.clone();
+                                let current_sender_option =
+                                    current_sender_option_clone.lock().unwrap().clone();
                                 //destoy old one if existing
                                 match current_sender_option {
                                     Some(tx) => {
@@ -196,8 +199,81 @@ impl AudioPlayer {
 
         let pk_current_audio =
             PlaylistKa::new(string_title.to_string(), vec![AudioKa::new_simple(title)]);
-        self.list_audio.push(pk_current_audio.clone());
-        self.queue_audio.push(pk_current_audio.clone());
+        self.list_audio
+            .lock()
+            .unwrap()
+            .push(pk_current_audio.clone());
+        self.queue_audio
+            .lock()
+            .unwrap()
+            .push(pk_current_audio.clone());
+
+        // get audio duration
+        let filename_clone = file_name.clone();
+        let nb_audio_for_th = nb_audio_clone.lock().unwrap().clone();
+        let mut ap = self.clone();
+        thread::spawn(move || {
+            let mut path = env::current_exe().expect("Failed to get executable path");
+            path.pop();
+            path.push("data");
+            path.push(format!("{}.wav", filename_clone));
+
+            let mut iter = 0;
+
+            while iter <= 10 {
+                let file_raw = File::open(&path);
+                match file_raw {
+                    Ok(file) => match rodio::Decoder::new(BufReader::new(file)) {
+                        Ok(audio_source) => {
+                            let hours = audio_source
+                                .total_duration()
+                                .unwrap_or(Duration::new(0, 0))
+                                .as_secs()
+                                / 60
+                                / 60;
+                            let minutes = audio_source
+                                .total_duration()
+                                .unwrap_or(Duration::new(0, 0))
+                                .as_secs()
+                                / 60;
+                            let secondes = audio_source
+                                .total_duration()
+                                .unwrap_or(Duration::new(0, 0))
+                                .as_secs() as u64
+                                % 60 as u64;
+                            let time = format!(
+                                "{hours}:{minutes}:{secondes}",
+                                hours = match hours {
+                                    0..=9 => format!("0{}", hours),
+                                    _ => hours.to_string(),
+                                },
+                                minutes = match minutes {
+                                    0..=9 => format!("0{}", minutes),
+                                    _ => minutes.to_string(),
+                                },
+                                secondes = match secondes {
+                                    0..=9 => format!("0{}", secondes),
+                                    _ => secondes.to_string(),
+                                }
+                            );
+                            ap.set_audioka_time(nb_audio_for_th, time);
+                            break;
+                        }
+                        Err(error) => {
+                            println!("{}", error);
+                            break;
+                        }
+                    },
+                    Err(error) => {
+                        iter = iter + 1;
+
+                        println!("Error: audio file problem : {}", error);
+                        println!("{:?}", path.clone());
+                        sleep(Duration::new(2, 0));
+                    }
+                }
+            }
+        });
 
         // init
         if *nb_audio_clone.lock().unwrap() == 1 {
@@ -260,15 +336,17 @@ impl AudioPlayer {
         return current_nb_audios_clone_u32 > 1 && nb_audio_clone_u32 > 1;
     }
 
-    pub fn print_audio_list(&mut self) -> Vec<String> {
-        let mut list_a = vec![];
-        for playlistka in &self.list_audio {
+    pub fn print_audio_list(&mut self) -> Vec<HashMap<String, String>> {
+        let mut list_audio = Vec::new();
+        for playlistka in (*self.list_audio.lock().unwrap()).clone() {
             for audioka in &playlistka.audios {
-                list_a.push(audioka.title.clone());
-                // println!("{}", audioka.title);
+                let mut audioka_hm = HashMap::new();
+                audioka_hm.insert("title".to_string(), audioka.title.clone());
+                audioka_hm.insert("time".to_string(), audioka.time.clone().to_string());
+                list_audio.push(audioka_hm);
             }
         }
-        list_a
+        list_audio
     }
 
     pub fn next_audio(&mut self) {
@@ -325,7 +403,7 @@ impl AudioPlayer {
         //destoy old one if existing
         match current_sender_option {
             Some(tx) => {
-                match tx.send("destroy".to_string()){
+                match tx.send("destroy".to_string()) {
                     Ok(_) => {}
                     Err(_) => {}
                 };
@@ -422,7 +500,7 @@ impl AudioPlayer {
                 Ok((_stream, stream_handle)) => {
                     let mut iter = 0;
 
-                    while (iter <= 10) {
+                    while iter <= 10 {
                         let file_raw = File::open(&path);
                         match file_raw {
                             Ok(file) => {
@@ -440,6 +518,7 @@ impl AudioPlayer {
 
                                                 sink.append(audio_source);
                                                 sink.play();
+                                                println!("playing");
                                                 let mut destroy = false;
                                                 while !(destroy) {
                                                     match rx.recv() {
@@ -473,7 +552,7 @@ impl AudioPlayer {
                                                                     destroy = true;
                                                                 }
                                                                 "status" => {
-                                                                    if sink.empty(){
+                                                                    if sink.empty() {
                                                                         *current_audio_statut.lock().unwrap() = AudioPlayerStatus::Empty;
                                                                         destroy = true;
                                                                     }
@@ -507,6 +586,25 @@ impl AudioPlayer {
             },
             None => {}
         }
+    }
+
+    fn set_audioka_time(&mut self, nb_playlistka: u32, time: String) {
+        (*self.list_audio.lock().unwrap())
+            .get_mut((nb_playlistka - 1) as usize)
+            .map_or_else(
+                || None,
+                |inner_value| {
+                    Some(
+                        inner_value
+                            .audios
+                            .get_mut(inner_value.current_audio_index as usize)
+                            .unwrap()
+                            .time = time.clone(),
+                    )
+                },
+            );
+        println!("around {} seconds", time.clone());
+        println!("---------------------------------------");
     }
 }
 
@@ -548,18 +646,22 @@ impl Display for PlaylistKa {
 pub struct AudioKa {
     pub title: String,
     pub url: String,
-    // time: f32,
+    pub time: String,
 }
 
 impl AudioKa {
-    pub fn new(title: String, url: String) -> Self {
-        Self { title, url }
+    pub fn new(title: String, url: String, time: String) -> Self {
+        Self { title, url, time }
     }
     pub fn new_simple(title: String) -> Self {
         Self {
             title,
             url: String::from(""),
+            time: String::from("00:00"),
         }
+    }
+    pub fn set_time(&mut self, time: String) {
+        self.time = time;
     }
 }
 

@@ -8,12 +8,12 @@
   let listItems: Item[] = [];
 
   async function loadList() {
-    let audio_title_processed: Array<string> = await invoke("get_list_audio");
-    if (audio_title_processed.length >= 0) {
-      audio_title_processed.forEach(function (audio_title) {
+    let audio_title_processed: Map<string, string> = await invoke("get_list_audio");
+    if (audio_title_processed.size >= 0) {
+      audio_title_processed.forEach((audio_title: string, time: string) => {
         const newItem: Item = {
           title: audio_title,
-          duration: "3:00",
+          duration: time,
         };
 
         listItems = [...listItems, newItem];
@@ -24,18 +24,21 @@
   let intervalId: number;
 
   async function updateList() {
-    let audio_title_processed: Array<string> = await invoke("get_list_audio");
     let tmplistItems: Item[] = [];
+    let audio_title_processed: any[] = await invoke("get_list_audio");
     if (audio_title_processed.length >= 0) {
-      audio_title_processed.forEach(function (audio_title) {
-        const newItem: Item = {
-          title: audio_title,
-          duration: "3:00",
-        };
+      console.log(audio_title_processed);
+      audio_title_processed.forEach((audio: any) => {
+        console.log(audio.time);
+          const newItem: Item = {
+            title: audio.title,
+            duration: audio.time,
+          };
 
-        tmplistItems = [...tmplistItems, newItem];
+          tmplistItems = [...tmplistItems, newItem];
       });
     }
+    
     listItems = tmplistItems;
   }
 
