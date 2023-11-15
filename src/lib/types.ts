@@ -1,10 +1,11 @@
-export interface Item {
-	title: string;
-	duration: string;
+export interface AudioKa {
+	title: string,
+	duration: string,
+	duration_nb: number
 }
 
-export interface Notif{
+export interface Notif {
 	id: number,
-	title: string;
+	title: string,
 	text: string
 }

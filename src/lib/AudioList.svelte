@@ -1,45 +1,46 @@
 <script lang="ts">
   import CardList from "$lib/CardList.svelte";
-  import Button from "$lib/Button.svelte";
   import { invoke } from "@tauri-apps/api/tauri";
-  import type { Item } from "$lib/types";
-  import { onDestroy, onMount } from "svelte";
+  import type { AudioKa } from "$lib/types";
+  import { getContext, onDestroy, onMount } from "svelte";
+  const { str_to_time }: any = getContext("cta");
 
-  let listItems: Item[] = [];
+  let listAudios: AudioKa[] = [];
+  let intervalId: number;
 
   async function loadList() {
-    let audio_title_processed: Map<string, string> = await invoke("get_list_audio");
+    let audio_title_processed: Map<string, string> = await invoke(
+      "get_list_audio"
+    );
     if (audio_title_processed.size >= 0) {
       audio_title_processed.forEach((audio_title: string, time: string) => {
-        const newItem: Item = {
+        const newAudio: AudioKa = {
           title: audio_title,
           duration: time,
+          duration_nb: str_to_time(time),
         };
 
-        listItems = [...listItems, newItem];
+        listAudios = [...listAudios, newAudio];
       });
     }
   }
 
-  let intervalId: number;
-
   async function updateList() {
-    let tmplistItems: Item[] = [];
-    let audio_title_processed: any[] = await invoke("get_list_audio");
-    if (audio_title_processed.length >= 0) {
-      console.log(audio_title_processed);
-      audio_title_processed.forEach((audio: any) => {
-        console.log(audio.time);
-          const newItem: Item = {
-            title: audio.title,
-            duration: audio.time,
-          };
+    let tmplistAudios: AudioKa[] = [];
+    let list_audio_processed: AudioKa[] = await invoke("get_list_audio");
+    if (list_audio_processed.length >= 0) {
+      list_audio_processed.forEach((audio: AudioKa) => {
+        const newAudio: AudioKa = {
+          title: audio.title,
+          duration: audio.duration,
+          duration_nb: str_to_time(audio.duration),
+        };
 
-          tmplistItems = [...tmplistItems, newItem];
+        tmplistAudios = [...tmplistAudios, newAudio];
       });
     }
-    
-    listItems = tmplistItems;
+
+    listAudios = tmplistAudios;
   }
 
   // Start checking the API when the component is mounted
@@ -59,5 +60,5 @@
 </script>
 
 <div class="overflow-auto pb-5 mb-5">
-  <CardList {listItems} />
+  <CardList {listAudios} />
 </div>

@@ -9,7 +9,7 @@ use crate::lib::model_lib::{
 };
 use cpal::traits::HostTrait;
 use cpal::{default_host, StreamError};
-use lib::model_lib::AudioPlayerStatus;
+use lib::model_lib::{AudioKa, AudioPlayerStatus};
 use rodio::Source;
 use rodio::{Device, DeviceTrait, Devices, OutputStream, Sink};
 use souvlaki::{MediaControls, PlatformConfig};
@@ -18,6 +18,7 @@ use std::ffi::c_void;
 use std::fs::File;
 use std::io::BufReader;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use std::{env, fs, io, thread};
 use tauri::State;
 
@@ -66,7 +67,7 @@ fn resume_pause(state: State<Arc<Mutex<Option<AudioPlayer>>>>) -> bool {
 }
 
 #[tauri::command]
-fn get_cta(state: State<Arc<Mutex<Option<AudioPlayer>>>>) -> String {
+fn get_cta(state: State<Arc<Mutex<Option<AudioPlayer>>>>) -> HashMap<String, String> {
     let ap_local_clone = state.inner().clone();
     let mut binding_ap = ap_local_clone.lock().unwrap();
     let mut binding_ap_none = AudioPlayer::new_none();
@@ -74,21 +75,27 @@ fn get_cta(state: State<Arc<Mutex<Option<AudioPlayer>>>>) -> String {
 
     if (*ap.nb_audios.lock().unwrap()) > 0 {
         let current_nb_audios_clone_u32 = *ap.current_nb_audios.clone().lock().unwrap();
-        (*ap.list_audio.lock().unwrap())
+        let mut audio_h = HashMap::new();
+        let current_audio = (*ap.list_audio.lock().unwrap())
             .get((current_nb_audios_clone_u32 - 1) as usize)
             .map_or_else(
-                || String::from("None"),
+                || AudioKa::new_simple("None".to_string()),
                 |inner_value| {
                     inner_value
                         .audios
                         .get(inner_value.current_audio_index as usize)
                         .unwrap()
-                        .title
-                        .to_string()
+                        .clone()
                 },
-            )
+            );
+        audio_h.insert("title".to_string(), current_audio.title.clone());
+        audio_h.insert(
+            "duration".to_string(),
+            current_audio.duration.clone().to_string(),
+        );
+        audio_h
     } else {
-        String::new()
+        HashMap::new()
     }
 }
 
@@ -250,6 +257,25 @@ fn get_default_audio_device(state: State<Arc<Mutex<Option<AudioPlayer>>>>) -> St
     default_device_name
 }
 
+#[tauri::command]
+fn set_audio_time(state: State<Arc<Mutex<Option<AudioPlayer>>>>, audio_time: u64) {
+    let ap_local_clone = state.inner().clone();
+    let mut binding_ap = ap_local_clone.lock().unwrap();
+    let mut binding_ap_none = AudioPlayer::new_none();
+    let ap = binding_ap.as_mut().unwrap_or(&mut binding_ap_none);
+    *ap.current_audio_time.lock().unwrap() = Duration::from_secs(audio_time);
+    ap.update_time();
+}
+
+#[tauri::command]
+fn get_player_status(state: State<Arc<Mutex<Option<AudioPlayer>>>>) -> bool {
+    let ap_local_clone = state.inner().clone();
+    let mut binding_ap = ap_local_clone.lock().unwrap();
+    let mut binding_ap_none = AudioPlayer::new_none();
+    let ap = binding_ap.as_mut().unwrap_or(&mut binding_ap_none);
+    return matches!(*ap.status.lock().unwrap(), AudioPlayerStatus::Play);
+}
+
 fn init() -> io::Result<()> {
     // Directory where the files are located
     let mut dir_path = env::current_exe().expect("Failed to get executable path");
@@ -371,7 +397,9 @@ fn main() {
                 set_volume,
                 get_audio_devices,
                 set_audio_device,
-                get_default_audio_device
+                get_default_audio_device,
+                set_audio_time,
+                get_player_status
             ])
             .run(tauri::generate_context!())
             .expect("error while running tauri application");

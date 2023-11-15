@@ -1,14 +1,20 @@
 <script lang="ts">
   import Button from "$lib/Button.svelte";
   import { invoke } from "@tauri-apps/api/tauri";
-  import type { Item } from "$lib/types";
+  import type { AudioKa } from "$lib/types";
   import { getContext } from "svelte";
 
-  const { update_cta, update_play, notify, get_cta }: any = getContext("cta");
+  const { update_cta, update_play, notify, get_cta_from_back }: any =
+    getContext("cta");
 
   let title: string = "";
-
   let btn_text = "+";
+  export let current_audio: AudioKa;
+
+  async function get_cta_inside(): Promise<AudioKa> {
+    current_audio = await get_cta_from_back();
+    return current_audio;
+  }
 
   async function addaudio() {
     notify("Start downloading", '"' + title + '" will be downloaded');
@@ -16,13 +22,16 @@
       titleAudio: title,
     });
 
-    let audio_title_processed: string = audio_processed[0];
+    let audio_title_processed: AudioKa = {
+      title: audio_processed[0],
+      duration: "00:00",
+      duration_nb: 0,
+    };
     let played: boolean = audio_processed[1];
 
     if (played) {
       update_cta(audio_title_processed);
       update_play(true);
-      notify("Now playing", 'Start to play: "' + get_cta() + '"');
     }
     title = "";
   }

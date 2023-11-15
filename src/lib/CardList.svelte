@@ -1,12 +1,12 @@
 <script lang="ts">
   import Card from "$lib/Card.svelte";
-  import type { Item } from "$lib/types";
+  import type { Audio } from "$lib/types";
 
-  export let listItems: Array<Item>;
+  export let listAudios: Array<Audio>;
 </script>
 
 <div class="list">
-  {#each listItems as item}
-    <Card title={item.title} duration={item.duration} />
+  {#each listAudios as audio}
+    <Card title={audio.title} duration={audio.duration} />
   {/each}
 </div>
